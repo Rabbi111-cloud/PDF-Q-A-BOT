@@ -1,77 +1,80 @@
 import os
-"""Load PDF, split, embed, and persist Chroma DB to CHROMA_DIR."""
-loader = PyPDFLoader(pdf_path)
-docs = loader.load()
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+
+VECTOR_DB_DIR = "vectordb"
+
+# Ensure directory exists
+os.makedirs(VECTOR_DB_DIR, exist_ok=True)
+
+# ---------------------------------
+# Load existing vectorstore if any
+# ---------------------------------
+def load_vectorstore():
+    """Return a Chroma vectorstore instance if DB exists, otherwise None."""
+    if os.path.exists(VECTOR_DB_DIR) and len(os.listdir(VECTOR_DB_DIR)) > 0:
+        embeddings = OpenAIEmbeddings()
+        return Chroma(
+            persist_directory=VECTOR_DB_DIR,
+            embedding_function=embeddings
+        )
+    return None
 
 
-splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-chunks = splitter.split_documents(docs)
+# ---------------------------------
+# Process & index PDF
+# ---------------------------------
+def process_pdf(pdf_path: str):
+    """Load PDF, split into chunks, embed, and store in Chroma DB."""
+    loader = PyPDFLoader(pdf_path)
+    documents = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
+    chunks = splitter.split_documents(documents)
+
+    embeddings = OpenAIEmbeddings()
+
+    vectordb = Chroma.from_documents(
+        documents=chunks,
+        embedding_function=embeddings,
+        persist_directory=VECTOR_DB_DIR
+    )
+    vectordb.persist()
+
+    return True
 
 
-embeddings = OpenAIEmbeddings()
+# ---------------------------------
+# Ask question from indexed PDF
+# ---------------------------------
+def ask_question(query: str):
+    """Retrieve relevant chunks & ask LLM."""
+    vectordb = load_vectorstore()
+    if vectordb is None:
+        return "No PDF has been uploaded yet."
 
+    retriever = vectordb.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
-vectordb = Chroma.from_documents(
-documents=chunks,
-embedding=embeddings,
-persist_directory=CHROMA_DIR,
-)
+    docs = retriever.get_relevant_documents(query)
 
+    content = "\n\n".join([d.page_content for d in docs])
 
-# Persist to disk
-vectordb.persist()
+    llm = ChatOpenAI(model="gpt-4o-mini")
 
+    prompt = f"""
+    You are a helpful AI assistant. Answer the question using ONLY the text below.
+    If the answer is not found, say "I cannot find the answer in the PDF."
 
+    PDF TEXT:
+    {content}
 
+    QUESTION: {query}
+    """
 
-def get_vectordb() -> Optional[Chroma]:
-"""Return a Chroma vectorstore instance if DB exists, otherwise None."""
-# If the persist dir exists and has files, return a live Chroma instance
-if os.path.isdir(CHROMA_DIR) and os.listdir(CHROMA_DIR):
-embeddings = OpenAIEmbeddings()
-return Chroma(persist_directory=CHROMA_DIR, embedding=embeddings)
-return None
-
-
-
-
-def ask_question(query: str) -> str:
-"""Run retrieval and call the LLM. Returns string answer or an error message."""
-vectordb = get_vectordb()
-if vectordb is None:
-return "Error: No PDF processed yet. Please upload and process a PDF first."
-
-
-docs = vectordb.similarity_search(query, k=4)
-if not docs:
-return "No relevant information found in the processed PDFs."
-
-
-context = "\n\n".join([d.page_content for d in docs])
-
-
-llm = OpenAI(temperature=0)
-
-
-prompt = f"""
-You are given the following context extracted from a PDF. Use ONLY this context to answer the user's question. If the answer is not contained in the context, say you don't know.
-
-
-Context:
-{context}
-
-
-Question: {query}
-
-
-Answer:
-"""
-
-
-response = llm.invoke(prompt)
-
-
-# Ensure it's a string
-if hasattr(response, "text"):
-return response.text
-return str(response)
+    response = llm.invoke(prompt)
+    return response.content
