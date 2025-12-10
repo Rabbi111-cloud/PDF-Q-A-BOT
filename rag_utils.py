@@ -1,5 +1,3 @@
-import os
-import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from pypdf import PdfReader
@@ -9,9 +7,8 @@ from pypdf import PdfReader
 # -------------------------------------
 embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
-documents = []          # Stores text chunks
-document_embeddings = None  # NumPy matrix
-faiss_index = None      # The FAISS index
+documents = []               # Stores text chunks
+document_embeddings = None   # Stores embeddings as numpy array
 
 
 # -------------------------------------
@@ -43,48 +40,52 @@ def split_text(text, chunk_size=500):
 
 
 # -------------------------------------
-# 3. Build FAISS index from chunks
+# 3. Process PDF and embed chunks
 # -------------------------------------
 def process_pdf(pdf_path):
-    global documents, document_embeddings, faiss_index
+    global documents, document_embeddings
 
     text = extract_text_from_pdf(pdf_path)
     chunks = split_text(text)
 
     documents = chunks
-
-    # Embed all chunks
     document_embeddings = embedding_model.encode(chunks, convert_to_numpy=True)
 
-    # Build FAISS index
-    dim = document_embeddings.shape[1]
-    faiss_index = faiss.IndexFlatL2(dim)
-    faiss_index.add(document_embeddings)
-
-    print("PDF processed and indexed successfully.")
+    print("PDF processed successfully.")
 
 
 # -------------------------------------
-# 4. Search & Answer questions
+# 4. Cosine similarity search
+# -------------------------------------
+def cosine_similarity(a, b):
+    a_norm = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-10)
+    b_norm = b / (np.linalg.norm(b) + 1e-10)
+    return np.dot(a_norm, b_norm)
+
+
+# -------------------------------------
+# 5. Ask question
 # -------------------------------------
 def ask_question(query, top_k=3):
-    global documents, document_embeddings, faiss_index
+    global documents, document_embeddings
 
-    if faiss_index is None:
+    if document_embeddings is None:
         return "Please upload a PDF first."
 
-    # Embed the question
-    query_embedding = embedding_model.encode([query], convert_to_numpy=True)
+    # Embed question
+    query_emb = embedding_model.encode([query], convert_to_numpy=True)[0]
 
-    # Search similar chunks
-    distances, indices = faiss_index.search(query_embedding, top_k)
+    # Compute cosine similarity for all chunks
+    scores = cosine_similarity(document_embeddings, query_emb)
 
-    retrieved_chunks = [documents[i] for i in indices[0] if i < len(documents)]
+    # Get top_k chunk indexes
+    top_indices = np.argsort(scores)[-top_k:][::-1]
 
-    # Combine into simple answer
-    combined_text = "\n".join(retrieved_chunks)
+    # Combine results into answer
+    result = "\n".join([documents[i] for i in top_indices])
 
-    if combined_text.strip() == "":
-        return "No relevant information found in the PDF."
+    if not result.strip():
+        return "No relevant content found."
 
-    return combined_text
+    return result
+
