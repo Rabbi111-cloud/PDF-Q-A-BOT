@@ -1,81 +1,90 @@
 import os
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from pypdf import PdfReader
 
-VECTOR_DB_DIR = "vectordb"
+# -------------------------------------
+# GLOBAL VARIABLES
+# -------------------------------------
+embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
-# Ensure vector DB directory exists
-os.makedirs(VECTOR_DB_DIR, exist_ok=True)
-
-
-# -------------------------------
-# Load VectorStore If Exists
-# -------------------------------
-def load_vectorstore():
-    """Load Chroma DB if available."""
-    if os.path.exists(VECTOR_DB_DIR) and len(os.listdir(VECTOR_DB_DIR)) > 0:
-        embeddings = OpenAIEmbeddings()
-        return Chroma(
-            persist_directory=VECTOR_DB_DIR,
-            embedding_function=embeddings
-        )
-    return None
+documents = []          # Stores text chunks
+document_embeddings = None  # NumPy matrix
+faiss_index = None      # The FAISS index
 
 
-# -------------------------------
-# Process Uploaded PDF
-# -------------------------------
-def process_pdf(pdf_path: str):
-    loader = PyPDFLoader(pdf_path)
-    docs = loader.load()
+# -------------------------------------
+# 1. Extract text from PDF
+# -------------------------------------
+def extract_text_from_pdf(pdf_path):
+    reader = PdfReader(pdf_path)
+    full_text = ""
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
-    )
-    chunks = splitter.split_documents(docs)
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        full_text += text + "\n"
 
-    embeddings = OpenAIEmbeddings()
-
-    vectordb = Chroma.from_documents(
-        documents=chunks,
-        embedding_function=embeddings,
-        persist_directory=VECTOR_DB_DIR
-    )
-
-    vectordb.persist()
-    return True
+    return full_text
 
 
-# -------------------------------
-# Ask Question From VectorStore
-# -------------------------------
-def ask_question(query: str):
-    vectordb = load_vectorstore()
-    if vectordb is None:
-        return "No PDF uploaded yet. Please upload one first."
+# -------------------------------------
+# 2. Split text into chunks
+# -------------------------------------
+def split_text(text, chunk_size=500):
+    words = text.split()
+    chunks = []
 
-    retriever = vectordb.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 3}
-    )
-    docs = retriever.get_relevant_documents(query)
+    for i in range(0, len(words), chunk_size):
+        chunk = " ".join(words[i:i + chunk_size])
+        chunks.append(chunk)
 
-    context = "\n\n".join([d.page_content for d in docs])
+    return chunks
 
-    llm = ChatOpenAI(model="gpt-4o-mini")
 
-    prompt = f"""
-    Answer the question using ONLY the text below.
-    If the answer cannot be found in the document, say so.
+# -------------------------------------
+# 3. Build FAISS index from chunks
+# -------------------------------------
+def process_pdf(pdf_path):
+    global documents, document_embeddings, faiss_index
 
-    CONTEXT:
-    {context}
+    text = extract_text_from_pdf(pdf_path)
+    chunks = split_text(text)
 
-    QUESTION: {query}
-    """
+    documents = chunks
 
-    response = llm.invoke(prompt)
-    return response.content
+    # Embed all chunks
+    document_embeddings = embedding_model.encode(chunks, convert_to_numpy=True)
+
+    # Build FAISS index
+    dim = document_embeddings.shape[1]
+    faiss_index = faiss.IndexFlatL2(dim)
+    faiss_index.add(document_embeddings)
+
+    print("PDF processed and indexed successfully.")
+
+
+# -------------------------------------
+# 4. Search & Answer questions
+# -------------------------------------
+def ask_question(query, top_k=3):
+    global documents, document_embeddings, faiss_index
+
+    if faiss_index is None:
+        return "Please upload a PDF first."
+
+    # Embed the question
+    query_embedding = embedding_model.encode([query], convert_to_numpy=True)
+
+    # Search similar chunks
+    distances, indices = faiss_index.search(query_embedding, top_k)
+
+    retrieved_chunks = [documents[i] for i in indices[0] if i < len(documents)]
+
+    # Combine into simple answer
+    combined_text = "\n".join(retrieved_chunks)
+
+    if combined_text.strip() == "":
+        return "No relevant information found in the PDF."
+
+    return combined_text
