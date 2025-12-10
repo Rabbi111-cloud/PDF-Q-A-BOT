@@ -1,91 +1,81 @@
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from pypdf import PdfReader
+import os
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
-# -------------------------------------
-# GLOBAL VARIABLES
-# -------------------------------------
-embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+VECTOR_DB_DIR = "vectordb"
 
-documents = []               # Stores text chunks
-document_embeddings = None   # Stores embeddings as numpy array
-
-
-# -------------------------------------
-# 1. Extract text from PDF
-# -------------------------------------
-def extract_text_from_pdf(pdf_path):
-    reader = PdfReader(pdf_path)
-    full_text = ""
-
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        full_text += text + "\n"
-
-    return full_text
+# Ensure vector DB directory exists
+os.makedirs(VECTOR_DB_DIR, exist_ok=True)
 
 
-# -------------------------------------
-# 2. Split text into chunks
-# -------------------------------------
-def split_text(text, chunk_size=500):
-    words = text.split()
-    chunks = []
-
-    for i in range(0, len(words), chunk_size):
-        chunk = " ".join(words[i:i + chunk_size])
-        chunks.append(chunk)
-
-    return chunks
-
-
-# -------------------------------------
-# 3. Process PDF and embed chunks
-# -------------------------------------
-def process_pdf(pdf_path):
-    global documents, document_embeddings
-
-    text = extract_text_from_pdf(pdf_path)
-    chunks = split_text(text)
-
-    documents = chunks
-    document_embeddings = embedding_model.encode(chunks, convert_to_numpy=True)
-
-    print("PDF processed successfully.")
+# -------------------------------
+# Load VectorStore If Exists
+# -------------------------------
+def load_vectorstore():
+    """Load Chroma DB if available."""
+    if os.path.exists(VECTOR_DB_DIR) and len(os.listdir(VECTOR_DB_DIR)) > 0:
+        embeddings = OpenAIEmbeddings()
+        return Chroma(
+            persist_directory=VECTOR_DB_DIR,
+            embedding_function=embeddings
+        )
+    return None
 
 
-# -------------------------------------
-# 4. Cosine similarity search
-# -------------------------------------
-def cosine_similarity(a, b):
-    a_norm = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-10)
-    b_norm = b / (np.linalg.norm(b) + 1e-10)
-    return np.dot(a_norm, b_norm)
+# -------------------------------
+# Process Uploaded PDF
+# -------------------------------
+def process_pdf(pdf_path: str):
+    loader = PyPDFLoader(pdf_path)
+    docs = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
+    chunks = splitter.split_documents(docs)
+
+    embeddings = OpenAIEmbeddings()
+
+    vectordb = Chroma.from_documents(
+        documents=chunks,
+        embedding_function=embeddings,
+        persist_directory=VECTOR_DB_DIR
+    )
+
+    vectordb.persist()
+    return True
 
 
-# -------------------------------------
-# 5. Ask question
-# -------------------------------------
-def ask_question(query, top_k=3):
-    global documents, document_embeddings
+# -------------------------------
+# Ask Question From VectorStore
+# -------------------------------
+def ask_question(query: str):
+    vectordb = load_vectorstore()
+    if vectordb is None:
+        return "No PDF uploaded yet. Please upload one first."
 
-    if document_embeddings is None:
-        return "Please upload a PDF first."
+    retriever = vectordb.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 3}
+    )
+    docs = retriever.get_relevant_documents(query)
 
-    # Embed question
-    query_emb = embedding_model.encode([query], convert_to_numpy=True)[0]
+    context = "\n\n".join([d.page_content for d in docs])
 
-    # Compute cosine similarity for all chunks
-    scores = cosine_similarity(document_embeddings, query_emb)
+    llm = ChatOpenAI(model="gpt-4o-mini")
 
-    # Get top_k chunk indexes
-    top_indices = np.argsort(scores)[-top_k:][::-1]
+    prompt = f"""
+    Answer the question using ONLY the text below.
+    If the answer cannot be found in the document, say so.
 
-    # Combine results into answer
-    result = "\n".join([documents[i] for i in top_indices])
+    CONTEXT:
+    {context}
 
-    if not result.strip():
-        return "No relevant content found."
+    QUESTION: {query}
+    """
 
-    return result
-
+    response = llm.invoke(prompt)
+    return response.content
