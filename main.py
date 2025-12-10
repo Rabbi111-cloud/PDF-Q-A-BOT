@@ -4,24 +4,32 @@ import tempfile
 
 app = FastAPI()
 
-vectordb = None
-
+# ---------------------------
+# Upload and Index PDF
+# ---------------------------
 @app.post("/upload")
-async def upload(pdf: UploadFile = File(...)):
-    global vectordb
+async def upload_pdf(pdf_file: UploadFile = File(...)):
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await pdf_file.read())
+            tmp_path = tmp.name
 
-    temp = tempfile.NamedTemporaryFile(delete=False)
-    temp.write(await pdf.read())
-    temp.close()
+        # Process + Index
+        process_pdf(tmp_path)
+        return {"message": "PDF uploaded and processed successfully"}
 
-    vectordb = process_pdf(temp.name)
-    return {"message": "PDF uploaded and processed."}
+    except Exception as e:
+        return {"error": str(e)}
 
+
+# ---------------------------
+# Ask Question Endpoint
+# ---------------------------
 @app.post("/ask")
-async def ask(q: str = Form(...)):
-    global vectordb
-    if vectordb is None:
-        return {"error": "Upload PDF first"}
-
-    answer = ask_question(vectordb, q)
-    return {"answer": answer}
+async def ask(query: str = Form(...)):
+    try:
+        answer = ask_question(query)
+        return {"answer": answer}
+    except Exception as e:
+        return {"error": str(e)}
