@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+langchain-openai
+langchain-text-splitters
+langchain-community
+chromadb
+pypdf
+python-multipart
+gradio
+requests
