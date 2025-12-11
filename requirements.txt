@@ -1,8 +1,9 @@
 fastapi
 uvicorn
 python-multipart
+numpy
+sentence-transformers
+torch
 pypdf
-langchain_community
-chromadb
-openai
+
 
