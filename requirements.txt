@@ -1,12 +1,7 @@
 fastapi
 uvicorn
 python-multipart
-
-langchain
-langchain-community
-langchain-openai
-langchain-text-splitters
-
-chromadb
 pypdf
+langchain
+chromadb
 openai
