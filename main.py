@@ -5,7 +5,7 @@ import tempfile
 
 app = FastAPI()
 
-# Allow Gradio or any frontend to access
+# Allow frontend access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,20 +13,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------
-# Health Check
-# ---------------------------
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-# ---------------------------
-# Process PDF
-# ---------------------------
 @app.post("/process")
 async def process_endpoint(pdf: UploadFile = File(...)):
     try:
-        # Save temp PDF
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(await pdf.read())
             tmp_path = tmp.name
@@ -36,9 +29,6 @@ async def process_endpoint(pdf: UploadFile = File(...)):
     except Exception as e:
         return {"error": str(e)}
 
-# ---------------------------
-# Ask Question
-# ---------------------------
 @app.post("/ask")
 async def ask_endpoint(payload: dict):
     try:
@@ -47,3 +37,4 @@ async def ask_endpoint(payload: dict):
         return {"answer": answer}
     except Exception as e:
         return {"error": str(e)}
+
