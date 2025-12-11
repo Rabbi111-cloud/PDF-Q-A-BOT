@@ -1,9 +1,9 @@
 import os
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.document_loaders import PyPDFLoader
-from langchain.vectorstores import Chroma
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
+from langchain_community.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings.openai import OpenAIEmbeddings
+from langchain_community.chat_models import ChatOpenAI
 
 # -------------------------------
 # VECTORSTORE DIRECTORY
