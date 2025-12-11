@@ -5,7 +5,7 @@ import tempfile
 
 app = FastAPI()
 
-# Enable CORS for Gradio / HF Spaces
+# Allow Gradio or any frontend to access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,7 +21,7 @@ async def health():
     return {"status": "ok"}
 
 # ---------------------------
-# Process + Index PDF
+# Process PDF
 # ---------------------------
 @app.post("/process")
 async def process_endpoint(pdf: UploadFile = File(...)):
@@ -31,11 +31,8 @@ async def process_endpoint(pdf: UploadFile = File(...)):
             tmp.write(await pdf.read())
             tmp_path = tmp.name
 
-        # Index PDF
         process_pdf(tmp_path)
-
         return {"message": "PDF processed successfully"}
-
     except Exception as e:
         return {"error": str(e)}
 
@@ -48,7 +45,5 @@ async def ask_endpoint(payload: dict):
         query = payload.get("question", "")
         answer = ask_question(query)
         return {"answer": answer}
-
     except Exception as e:
         return {"error": str(e)}
-
