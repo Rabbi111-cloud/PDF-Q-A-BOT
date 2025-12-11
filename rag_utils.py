@@ -1,5 +1,5 @@
 import os
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitters import RecursiveCharacterTextSplitter
 from langchain.document_loaders import PyPDFLoader
 from langchain.vectorstores import Chroma
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -74,3 +74,4 @@ QUESTION: {query}
     except Exception as e:
         print("❌ Error in ask_question:", e)
         return "Error while processing your question."
+
