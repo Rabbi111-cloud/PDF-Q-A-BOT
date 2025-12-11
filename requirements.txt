@@ -1,9 +1,16 @@
 fastapi
 uvicorn
 python-multipart
-numpy
-sentence-transformers
-torch
+
+langchain
+langchain-community
+langchain-openai
+langchain-text-splitters
+
+chromadb
 pypdf
+openai
+requests
+gradio
 
 
